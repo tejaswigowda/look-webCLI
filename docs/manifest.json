@@ -1,0 +1,13 @@
+{
+  "name": "look-webCLI",
+  "short_name": "look-webCLI",
+  "description": "Edit the look of a VRM (textures, colors, materials, outfits, accessories) and export it. 100% local.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0f1a",
+  "theme_color": "#0d0f1a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

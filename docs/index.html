@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' blob: data: https:; frame-src 'self'; manifest-src 'self'; form-action 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d0f1a">
+  <meta name="description" content="Edit the look of a VRM (textures, colors, materials, outfits, accessories) and export it. VRM in, edited VRM out. 100% local: nothing leaves your browser.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="look-webCLI">
+  <title>look-webCLI</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+  <script src="js/guard.js"></script>
+</head>
+<body>
+<header>
+  <h1>look-webCLI</h1>
+  <span class="pill">VRM look editor</span>
+  <span class="badge-local" title="Verify in DevTools, Network tab">&#9679; 100% local &middot; zero egress</span>
+  <a class="gh-link" href="https://github.com/tejaswigowda/look-webCLI" target="_blank" rel="noopener noreferrer">GitHub</a>
+</header>
+
+<div class="container">
+  <div class="statusbar"><span class="dot" id="dot"></span><span class="spinner" id="spinner" hidden></span><span id="statusText">Loading the editor...</span></div>
+  <div class="busybar indeterminate" id="busyBar" role="progressbar" aria-label="Processing" hidden><div></div></div>
+
+  <div class="card">
+    <div class="card-header">1 &middot; Input</div>
+    <div class="card-body">
+      <div class="inputs">
+        <div class="drop-zone" id="dropZone" tabindex="0">
+          <strong>Choose a VRM</strong>
+          <small>VRM 0.x or 1.0 (.vrm, or a binary .glb)<br>Drop or click. Read in this tab; never uploaded.</small>
+        </div>
+        <input type="file" id="vrmInput" data-testid="vrm-input" hidden accept=".vrm,.glb">
+        <div class="url-box">
+          <label class="field" for="vrmUrl">...or a URL (read-only GET)</label>
+          <div class="row">
+            <input type="text" id="vrmUrl" class="grow" data-testid="vrm-url" spellcheck="false" autocomplete="off" placeholder="https://example.com/avatar.vrm, a data: URL, or owner/repo@ref:path">
+            <button class="btn btn-ghost" id="btnLoad" data-testid="load">Load</button>
+          </div>
+          <div class="row">
+            <button class="btn btn-ghost btn-sm" id="btnSample" data-testid="sample">Try with the sample (VRoid male, 22 MB)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card editor-card">
+    <div class="card-header">2 &middot; Edit and export <span class="pill">cecil-tools/VRMEditorTools</span></div>
+    <div class="card-body">
+      <div class="row export-row">
+        <button class="btn btn-success" id="btnDownload" data-testid="download" disabled>Download VRM</button>
+        <span class="note grow" id="resultInfo" data-testid="result" aria-live="polite">Load a VRM, edit it in the editor below, then download the baked file.</span>
+      </div>
+    </div>
+    <iframe id="editor" class="editor-frame" title="VRM editor" referrerpolicy="no-referrer"></iframe>
+  </div>
+</div>
+
+<footer>
+  <div class="card">
+    <div class="card-header">Privacy and limits</div>
+    <div class="card-body">
+      <div class="note"><b>Zero egress.</b> Your VRM and the edited file never leave this device. Open DevTools, Network tab, load a VRM and download: only static files from this site are requested, all <code>GET</code>, none carrying a body, cookie or credential. The one exception is a URL you name yourself, which is fetched with a read-only <code>GET</code> (nothing is sent). This is a pure transform: no account, token, upload or versioning. Inputs given as <code>?vrm=</code> are fetched the same way, and <code>run=export</code> bakes without a click.</div>
+      <ul>
+        <li>The editor re-exports the VRM through its own writer: the file is the editor's output, not a byte-for-byte edit of the input.</li>
+        <li>The editor is a patched build of the third-party cecil-tools/VRMEditorTools (MIT) with every network feature removed.</li>
+        <li>No service worker: it works offline after the first load because everything is a same-origin static file.</li>
+      </ul>
+      <div class="note">Part of the <a href="https://arxiv.org/abs/2608.28950" target="_blank" rel="noopener noreferrer">Web-CLI</a> family with ffmpeg-webCLI, whisper-webCLI, 3mf-webCLI, bodyrig-webCLI, portrait-webCLI and Strata.</div>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

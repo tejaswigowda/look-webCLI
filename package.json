@@ -1,0 +1,31 @@
+{
+  "name": "look-webCLI",
+  "version": "0.1.0",
+  "description": "Client-side VRM look editor: VRM in (file or URL), edited and baked VRM out. Textures, colors, materials, outfits, accessories. Zero egress.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "build:editor": "sh scripts/build-editor.sh",
+    "test:unit": "node --test --test-reporter=spec tests/unit.test.mjs",
+    "test:static": "node --test --test-reporter=spec tests/static.test.mjs",
+    "test:e2e": "node --test --test-reporter=spec --test-concurrency=1 tests/e2e.test.mjs",
+    "test": "npm run test:unit && npm run test:static && npm run test:e2e"
+  },
+  "keywords": [
+    "vrm",
+    "vroid",
+    "avatar",
+    "texture",
+    "offline",
+    "client-side",
+    "webCLI"
+  ],
+  "author": "Tejaswi Gowda",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

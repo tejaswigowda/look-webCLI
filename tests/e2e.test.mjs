@@ -26,8 +26,19 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await new Promise(r => server?.close(r)); });
 
-async function open(url, { watch = false } = {}) {
+// Records every change of the progress bar (not a poll, so nothing between two samples is missed) in window.__prog.
+const OBSERVER = () => {
+  window.__prog = [];
+  new MutationObserver(() => {
+    const bar = document.querySelector('[data-testid=progress]');
+    if (!bar || !document.body) return;
+    window.__prog.push({ hidden: bar.hidden, now: bar.getAttribute('aria-valuenow'), text: bar.getAttribute('aria-valuetext'), loading: document.body.dataset.loading, role: bar.getAttribute('role'), busy: document.body.getAttribute('aria-busy'), flag: window.__look_loading });
+  }).observe(document, { subtree: true, attributes: true, attributeFilter: ['hidden', 'aria-valuenow', 'aria-valuetext', 'data-loading', 'aria-busy'] });
+};
+
+async function open(url, { watch = false, observe = false } = {}) {
   const page = await browser.newPage({ viewport: { width: 1360, height: 1000 }, acceptDownloads: true });
+  if (observe) await page.addInitScript(OBSERVER);
   const requests = [];
   if (watch) page.on('request', r => requests.push({ url: r.url(), method: r.method(), body: r.postData(), frame: r.frame() === page.mainFrame() ? 'main' : 'sub' }));
   await page.goto(`${origin}${url}`);
@@ -246,6 +257,125 @@ test('(i) the selector loads the female base into the editor and the viewport is
   assert.ok(after > before * 1.5, 'the editor viewport still looks empty');
   if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
   await page.close();
+});
+
+const nums = prog => prog.filter(p => !p.hidden && p.now != null).map(p => Number(p.now));
+const labels = prog => new Set(prog.filter(p => !p.hidden).map(p => (p.text || '').replace(/, \d+%$/, '')));
+
+async function assertIdleBar(page) {
+  assert.equal(await page.getByTestId('progress').isHidden(), true, 'the progress bar is still visible');
+  assert.equal(await page.getAttribute('body', 'data-loading'), 'false');
+  assert.equal(await page.getAttribute('body', 'aria-busy'), 'false');
+  assert.equal(await page.evaluate(() => window.__look_loading), false);
+}
+
+async function blankCanvasSize() {
+  const blank = await open('/index.html');
+  const f = blank.page.locator('#editor').contentFrame();
+  await f.locator('canvas').first().waitFor({ timeout: 60000 });
+  await blank.page.waitForTimeout(1500);
+  const n = (await f.locator('canvas').first().screenshot()).length;
+  await blank.page.close();
+  return n;
+}
+
+test('(j) the progress bar shows byte progress, then the editor stages, until the editor reports the VRM loaded', T, async () => {
+  const empty = await blankCanvasSize();
+  const { page } = await open('/index.html', { observe: true });
+  await page.locator('#editor').contentFrame().locator('canvas').first().waitFor({ timeout: 60000 });
+  await assertIdleBar(page);
+  assert.equal(await page.getAttribute('[data-testid=progress]', 'role'), 'progressbar');
+  // 8 MB/s: the 22 MB base takes a few seconds, so the byte progress of the fetch stage is observable
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: 8 * 1024 * 1024, uploadThroughput: -1 });
+  await page.evaluate(() => { window.__prog.length = 0; });
+  await page.getByTestId('load-base').click();
+  await page.waitForSelector('[data-testid=progress]:not([hidden])', { timeout: 10000 });
+  await page.waitForFunction(() => document.body.dataset.loading === 'false' && /loaded/.test(document.querySelector('#resultInfo').textContent), null, { timeout: 200000 });
+  const prog = await page.evaluate(() => window.__prog);
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+
+  assert.ok(prog.some(p => !p.hidden), 'the bar was visible between the click and the end');
+  assert.ok(prog.filter(p => !p.hidden).every(p => p.loading === 'true' && p.busy === 'true' && p.flag === true && p.role === 'progressbar'), 'visible means loading=true everywhere');
+  const n = nums(prog);
+  assert.ok(new Set(n).size >= 4, `expected several distinct percentages, got ${[...new Set(n)]}`);
+  assert.deepEqual(n, [...n].sort((a, b) => a - b), 'aria-valuenow never decreases within one load');
+  assert.ok(n.some(v => v > 2 && v < 30), 'byte progress of the fetch stage was seen');
+  assert.ok(n.every(v => v >= 2 && v <= 98), 'between 2% and 98% while visible');
+  const seen = labels(prog);
+  for (const l of ['Fetching the VRM', 'Rendering the model']) assert.ok(seen.has(l), `stage "${l}" was shown: ${[...seen]}`);
+  assert.ok(prog.filter(p => !p.hidden && p.text).every(p => /^[A-Z].*(, \d+%)?$/.test(p.text)), 'aria-valuetext carries the label');
+  const last = prog.at(-1);
+  assert.equal(last.hidden, true); assert.equal(last.loading, 'false');
+
+  await assertIdleBar(page);
+  assert.equal(await page.getAttribute('body', 'data-webcli-status'), 'idle', 'a manual load never leaves idle');
+  assert.equal(await page.getByTestId('download').isDisabled(), false);
+  const after = (await page.locator('#editor').contentFrame().locator('canvas').first().screenshot()).length;
+  assert.ok(after > empty * 1.5, `the editor had rendered the avatar when the bar ended (${empty} -> ${after})`);
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace(/(\.png)?$/, '-done.png') });
+  await page.close();
+});
+
+test('(k) ?vrm=male&run=export keeps the bar up through the load, then shows an indeterminate bake; same bytes as before', T, async () => {
+  const { page } = await open('/index.html?vrm=male&run=export', { observe: true });
+  await page.waitForSelector(DONE, { timeout: 200000 });
+  const r = await readResult(page);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(sha(r.artifact.b64), SAMPLE_SHA, 'still the identity on the male base');
+  const prog = await page.evaluate(() => window.__prog);
+  const seen = labels(prog);
+  assert.ok(seen.has('Rendering the model'), `${[...seen]}`);
+  const n = nums(prog);
+  assert.deepEqual(n, [...n].sort((a, b) => a - b));
+  assert.ok(prog.some(p => !p.hidden && p.text === 'Baking the edits into the VRM' && p.now == null), 'the bake bar is indeterminate (no aria-valuenow)');
+  await assertIdleBar(page);
+  await page.close();
+});
+
+test('(l) a second VRM loaded while the first is still loading takes over: the bar ends hidden and the female bytes win', T, async () => {
+  const { page } = await open('/index.html', { observe: true });
+  await page.locator('#editor').contentFrame().locator('canvas').first().waitFor({ timeout: 60000 });
+  await page.getByTestId('load-base').click();
+  await page.waitForFunction(() => /Rendering the model/.test(document.querySelector('[data-testid=progress]').getAttribute('aria-valuetext') || ''), null, { timeout: 60000 });
+  await page.getByTestId('base').selectOption('female');
+  await page.getByTestId('load-base').click();
+  await expect(page, '#resultInfo', /VRoid_V110_Female_v1\.1\.3\.vrm .*loaded/, 200000);
+  await assertIdleBar(page);
+  await page.waitForTimeout(2500);
+  await assertIdleBar(page); // nothing from the abandoned load brings it back
+  assert.equal(await page.getAttribute('body', 'data-webcli-status'), 'idle');
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 200000 }), page.getByTestId('download').click()]);
+  assert.equal(download.suggestedFilename(), 'VRoid_V110_Female_v1.1.3.look.vrm');
+  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(await download.path())).digest('hex'), crypto.createHash('sha256').update(fs.readFileSync(FEMALE_FILE)).digest('hex'));
+  await assertIdleBar(page);
+  await page.close();
+});
+
+test('(m) unreadable input hides the bar and shows the error: not a VRM (file and URL), and a glTF the editor cannot load times out', T, async () => {
+  const { page } = await open('/index.html', { observe: true });
+  await page.getByTestId('vrm-input').setInputFiles({ name: 'notes.vrm', mimeType: 'application/octet-stream', buffer: Buffer.from('this is not a glTF binary at all, just text') });
+  await page.waitForSelector('body[data-webcli-status=error]', { timeout: 30000 });
+  assert.match(await page.locator('#statusText').textContent(), /Not a VRM/);
+  assert.match(await page.getByTestId('result').textContent(), /Not a VRM/);
+  await assertIdleBar(page);
+  await page.getByTestId('vrm-url').fill('/index.html');
+  await page.getByTestId('load').click();
+  await page.waitForFunction(() => /Not a VRM/.test(document.querySelector('#statusText').textContent) && document.body.dataset.loading === 'false');
+  await page.close();
+
+  // a binary glTF with no VRM in it passes the wrapper's check; the editor never reports it loaded (or reports a failure): either way the bar must end with an error
+  const json = Buffer.from('{"asset":{"version":"2.0"}}  ');
+  const g = Buffer.concat([Buffer.alloc(20), json]);
+  g.writeUInt32LE(0x46546c67, 0); g.writeUInt32LE(2, 4); g.writeUInt32LE(g.length, 8); g.writeUInt32LE(json.length, 12); g.writeUInt32LE(0x4e4f534a, 16);
+  const t = await open('/index.html?timeout=10', { observe: true });
+  await t.page.getByTestId('vrm-input').setInputFiles({ name: 'plain.glb', mimeType: 'model/gltf-binary', buffer: g });
+  await t.page.waitForSelector('body[data-webcli-status=error]', { timeout: 60000 });
+  assert.match(await t.page.locator('#statusText').textContent(), /did not finish loading|could not load/);
+  await assertIdleBar(t.page);
+  assert.ok((await t.page.evaluate(() => window.__prog)).some(p => !p.hidden), 'the bar was shown while it tried');
+  await t.page.close();
 });
 
 async function expect(page, selector, re, timeout = 120000) {

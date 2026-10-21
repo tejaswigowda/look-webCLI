@@ -7,7 +7,33 @@ export const STATUSES = ['idle', 'running', 'done', 'error'];
 export const MIME = 'model/gltf-binary';
 export const MESSAGES = Object.freeze({
   ready: 'look-editor-ready', load: 'look-load-vrm', apply: 'look-apply', edited: 'look-edited-vrm', failed: 'look-apply-failed',
+  progress: 'look-vrm-progress', loaded: 'look-vrm-loaded', loadFailed: 'look-vrm-failed',
 });
+
+// The progress bar is stage-driven. `percent` is where a stage starts (null: indeterminate), `ceiling` is where the bar may creep to while the
+// editor works without reporting; fetch/read span from..to by bytes when the length is known.
+export const STAGES = Object.freeze({
+  fetch: { label: 'Fetching the VRM', from: 2, to: 30 },
+  read: { label: 'Reading the file', from: 2, to: 30 },
+  hand: { label: 'Handing the VRM to the editor', percent: 35 },
+  render: { label: 'Rendering the model', percent: 45, ceiling: 68 },
+  textures: { label: 'Reading textures and materials', percent: 70, ceiling: 98 },
+  loaded: { label: 'Loaded', percent: 100 },
+  bake: { label: 'Baking the edits into the VRM', percent: null },
+});
+
+// -> { stage, label, percent: integer 0..100 | null, ceiling: number | null }. fraction (0..1) only matters for fetch and read.
+export function stageProgress(stage, fraction = null) {
+  const st = STAGES[stage];
+  if (!st) throw new Error(`Unknown stage ${stage}`);
+  let percent = st.percent ?? null;
+  if (st.from != null && typeof fraction === 'number' && Number.isFinite(fraction)) percent = Math.round(st.from + (st.to - st.from) * Math.min(1, Math.max(0, fraction)));
+  return { stage, label: st.label, percent, ceiling: st.ceiling ?? null };
+}
+
+// One creep step toward the ceiling: never decreases, never passes the ceiling.
+export const creepPercent = (p, ceiling, rate = 0.06) => Math.min(ceiling, p + Math.max(0.15, (ceiling - p) * rate));
+
 
 // The bundled VRoid bases: vrm=male and vrm=female are same-origin GETs of these files.
 export const BASES = Object.freeze({ male: 'sample/VRoid_V110_Male_v1.1.3.vrm', female: 'sample/VRoid_V110_Female_v1.1.3.vrm' });
@@ -80,12 +106,29 @@ function nameFromUrl(url) {
   try { return decodeURIComponent(new URL(url, 'http://x/').pathname.split('/').pop() || ''); } catch { return ''; }
 }
 
-// Returns { name, buf, url }. Only ever a GET with no body and no credentials.
-export async function fetchInput(spec, fallbackName = 'model', fetchImpl = globalThis.fetch) {
+// Reads a byte stream to one ArrayBuffer. onProgress gets 0..1 when the total is known (>0) and null when it is not.
+export async function readStream(stream, total = 0, onProgress = null) {
+  const reader = stream.getReader(), chunks = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); got += value.length;
+    if (onProgress) onProgress(total > 0 ? Math.min(1, got / total) : null);
+  }
+  const out = new Uint8Array(got);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out.buffer;
+}
+
+// Returns { name, buf, url }. Only ever a GET with no body and no credentials. onProgress(fraction | null) is called while the body streams in.
+export async function fetchInput(spec, fallbackName = 'model', fetchImpl = globalThis.fetch, onProgress = null) {
   const url = expandSource(spec);
   const get = async u => {
     const res = await fetchImpl(u, { method: 'GET', credentials: 'omit', referrerPolicy: 'no-referrer' });
     if (!res.ok) throw new Error(`GET ${u.slice(0, 120)}: ${res.status}`);
+    if (onProgress && res.body && typeof res.body.getReader === 'function') return readStream(res.body, Number(res.headers?.get?.('content-length')) || 0, onProgress);
     return res.arrayBuffer();
   };
   let buf;

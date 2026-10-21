@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   OPS, MESSAGES, BASES, expandSource, rawFallback, parseRunParams, isGlb, assertVrm, vrmVersionOf, sniffExt, outName, baseName,
-  fetchInput, bytesToBase64, makeResult, failure,
+  fetchInput, bytesToBase64, makeResult, failure, STAGES, stageProgress, creepPercent, readStream,
 } from '../docs/js/webcli.js';
 
 // a minimal binary glTF: header, JSON chunk, no BIN chunk
@@ -19,7 +19,10 @@ function glb(json = { asset: { version: '2.0' } }) {
 
 test('the only op is export, and the message types are look-*', () => {
   assert.deepEqual(OPS, ['export']);
-  assert.deepEqual(MESSAGES, { ready: 'look-editor-ready', load: 'look-load-vrm', apply: 'look-apply', edited: 'look-edited-vrm', failed: 'look-apply-failed' });
+  assert.deepEqual(MESSAGES, {
+    ready: 'look-editor-ready', load: 'look-load-vrm', apply: 'look-apply', edited: 'look-edited-vrm', failed: 'look-apply-failed',
+    progress: 'look-vrm-progress', loaded: 'look-vrm-loaded', loadFailed: 'look-vrm-failed',
+  });
 });
 
 test('parseRunParams reads vrm and run from the query', () => {
@@ -158,4 +161,66 @@ test('fetchInput on an alias is one GET of the bundled file and names it from th
   assert.equal(calls[0][1].method, 'GET'); assert.equal(calls[0][1].credentials, 'omit');
   assert.equal(f.name, 'VRoid_V110_Female_v1.1.3.vrm');
   assert.equal(outName(f.name), 'VRoid_V110_Female_v1.1.3.look.vrm');
+});
+
+test('stageProgress maps the stages to labels and percentages; fetch and read follow the byte fraction, the rest are fixed', () => {
+  assert.deepEqual(stageProgress('hand'), { stage: 'hand', label: 'Handing the VRM to the editor', percent: 35, ceiling: null });
+  assert.deepEqual(stageProgress('render'), { stage: 'render', label: 'Rendering the model', percent: 45, ceiling: 68 });
+  assert.deepEqual(stageProgress('textures'), { stage: 'textures', label: 'Reading textures and materials', percent: 70, ceiling: 98 });
+  assert.equal(stageProgress('loaded').percent, 100);
+  assert.deepEqual(stageProgress('bake'), { stage: 'bake', label: 'Baking the edits into the VRM', percent: null, ceiling: null });
+  assert.equal(stageProgress('fetch').percent, null, 'unknown length: indeterminate');
+  assert.equal(stageProgress('fetch', null).percent, null);
+  assert.equal(stageProgress('read', NaN).percent, null);
+  assert.equal(stageProgress('fetch', 0).percent, 2);
+  assert.equal(stageProgress('fetch', 0.5).percent, 16);
+  assert.equal(stageProgress('read', 1).percent, 30);
+  assert.equal(stageProgress('read', 7).percent, 30, 'clamped');
+  assert.equal(stageProgress('read', -1).percent, 2, 'clamped');
+  assert.throws(() => stageProgress('nope'), /Unknown stage/);
+});
+
+test('the stages are ordered: every fixed percentage is above the one before it, and the creep ceilings stay below the next stage', () => {
+  const order = ['fetch', 'hand', 'render', 'textures', 'loaded'];
+  assert.ok(STAGES.fetch.to < STAGES.hand.percent && STAGES.hand.percent < STAGES.render.percent && STAGES.render.ceiling < STAGES.textures.percent);
+  assert.ok(STAGES.textures.ceiling < STAGES.loaded.percent);
+  assert.ok(order.every(k => k in STAGES));
+});
+
+test('creepPercent only goes up, never passes the ceiling, and still moves near it', () => {
+  let p = 45;
+  for (let i = 0; i < 2000; i++) { const n = creepPercent(p, 68); assert.ok(n >= p && n <= 68); p = n; }
+  assert.equal(p, 68);
+  assert.ok(creepPercent(67.99, 68) <= 68);
+  assert.ok(creepPercent(45, 68) > 45);
+});
+
+test('readStream concatenates the chunks and reports 0..1 when the total is known, null when it is not', async () => {
+  const mk = () => new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2, 3])); c.enqueue(new Uint8Array([4, 5])); c.enqueue(new Uint8Array([6])); c.close(); } });
+  const seen = [];
+  const buf = await readStream(mk(), 6, f => seen.push(f));
+  assert.deepEqual([...new Uint8Array(buf)], [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(seen, [0.5, 5 / 6, 1]);
+  const unknown = [];
+  await readStream(mk(), 0, f => unknown.push(f));
+  assert.deepEqual(unknown, [null, null, null]);
+  assert.equal((await readStream(mk(), 4, () => {})).byteLength, 6);
+});
+
+test('fetchInput streams the body with byte progress when the length is known; still a GET without body or credentials', async () => {
+  const g = new Uint8Array(glb());
+  const half = Math.floor(g.length / 2);
+  const calls = [], seen = [];
+  const fakeFetch = async (u, init) => {
+    calls.push([u, init]);
+    return {
+      ok: true, status: 200, headers: new Headers({ 'content-length': String(g.length) }),
+      body: new ReadableStream({ start(c) { c.enqueue(g.slice(0, half)); c.enqueue(g.slice(half)); c.close(); } }),
+      arrayBuffer: async () => { throw new Error('arrayBuffer must not be used when streaming'); },
+    };
+  };
+  const f = await fetchInput('https://example.com/a.vrm', 'model', fakeFetch, fr => seen.push(fr));
+  assert.deepEqual(seen, [half / g.length, 1]);
+  assert.deepEqual(new Uint8Array(f.buf), g);
+  assert.equal(calls[0][1].method, 'GET'); assert.equal(calls[0][1].credentials, 'omit'); assert.equal(calls[0][1].body, undefined);
 });

@@ -78,6 +78,13 @@ test('the postMessage types are look-* and match js/webcli.js; nothing is called
   for (const t of Object.values(MESSAGES)) assert.ok(bundle.includes(`"${t}"`), `${t} is missing from the editor bundle`);
   const used = new Set([...bundle.matchAll(/"(look-[a-z-]+)"/g)].map(m => m[1]));
   assert.deepEqual([...used].sort(), Object.values(MESSAGES).sort());
+  assert.equal(Object.values(MESSAGES).length, 8);
+  // the build recipe says the same: the patch uses every message type, and scripts/README.md documents each one
+  const patch = fs.readFileSync(path.join(root, 'scripts', 'look-embed.patch'), 'utf8'), doc = fs.readFileSync(path.join(root, 'scripts', 'README.md'), 'utf8');
+  for (const t of Object.values(MESSAGES)) { assert.ok(patch.includes(`'${t}'`), `${t} is missing from scripts/look-embed.patch`); assert.ok(doc.includes(`\`${t}\``), `${t} is not documented in scripts/README.md`); }
+  // loading messages are embed-only and only ever target this origin
+  assert.match(bundle, /key:"lookNotify",value:function\(e\)\{this\.embed&&window\.parent\.postMessage\(e,window\.location\.origin\)\}/);
+  assert.match(patch, /if \(this\.embed\) window\.parent\.postMessage\(msg, window\.location\.origin\)/);
   for (const f of [...walk(docs), path.join(root, 'scripts', 'look-embed.patch'), path.join(root, 'scripts', 'build-editor.sh')]) {
     if (/\.(vrm|ico|svg)$/.test(f)) continue;
     assert.ok(!/facebind/i.test(fs.readFileSync(f, 'utf8')), `${path.relative(root, f)} still mentions facebind`);

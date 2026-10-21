@@ -137,7 +137,7 @@ index 0424231..3530329 100755
 +@keyframes export-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
 +</style>
 diff --git a/app/src/components/Main.vue b/app/src/components/Main.vue
-index 23d5e3f..c8e0124 100755
+index 23d5e3f..d0ccceb 100755
 --- a/app/src/components/Main.vue
 +++ b/app/src/components/Main.vue
 @@ -1,11 +1,12 @@
@@ -198,6 +198,37 @@ index 23d5e3f..c8e0124 100755
      const urlParams = new URLSearchParams(window.location.search);
      const paramVrm = urlParams.get('vrm');
      if (paramVrm) {
+@@ -164,21 +201,29 @@ export default class Main extends Vue {
+     }
+   }
+ 
++  // look-webCLI embed: tell the parent how far loading has got (same origin only), so it can show real progress and knows when the VRM can be baked
++  lookNotify(msg: any) {
++    if (this.embed) window.parent.postMessage(msg, window.location.origin)
++  }
++
+   drawVrm(file: File) {
+     const vrmview = this.$refs.vrmview as VRMView
+     vrmview.drawVrm( file )
+       .then(() => {
++          this.lookNotify({ type: 'look-vrm-progress', stage: 'viewer' })
+           // VRMパース
+           const vrmparser = this.$refs.vrmparser as VRMParserView    
+-          vrmparser.parse( file )
++          return vrmparser.parse( file )
+             .then((json) => {
+               // カメラ位置を調整する
+               vrmview.setCameraTarget(json);
+               this.currentLoadedVRMVersion = VRMParser.getVRMVersion().version;
++              this.lookNotify({ type: 'look-vrm-loaded' })
+             })
+         })
+         .catch((e) => {
+           console.log(e)
++          this.lookNotify({ type: 'look-vrm-failed', message: String((e && e.message) || e) })
+         })
+   }
+ 
 diff --git a/app/src/components/VRMParserView.vue b/app/src/components/VRMParserView.vue
 index 4cadc4c..51b5d6a 100755
 --- a/app/src/components/VRMParserView.vue

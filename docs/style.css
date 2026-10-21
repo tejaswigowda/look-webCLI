@@ -137,6 +137,18 @@ footer .card-body { gap: 8px; }
 footer ul { margin-left: 18px; font-size: .8rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
 footer code, .note code { font-family: var(--mono); font-size: .74rem; color: var(--accent-h); }
 
+/* look-webCLI: progress bar (stage-driven; label and NN% in the status bar) */
+.busy-pct { margin-left: auto; font-family: var(--mono); font-size: .8rem; color: var(--accent-h); font-weight: 700; }
+.busybar { height: 6px; border-radius: 3px; margin: -10px 0 16px; }
+.busybar > div { border-radius: 3px; }
+.busybar.determinate > div { transition: width .25s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .busybar.indeterminate > div { animation: none; width: 100%; opacity: .55; }
+  .busybar.determinate > div { transition: none; }
+  .spinner { animation-duration: 2.4s; }
+  .dot.busy { animation: none; }
+}
+
 /* look-webCLI: input card, the editor iframe and the card that holds it */
 .container > .card { margin-bottom: 16px; }
 .inputs { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 14px; align-items: stretch; }

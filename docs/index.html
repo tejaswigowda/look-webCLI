@@ -26,8 +26,8 @@
 </header>
 
 <div class="container">
-  <div class="statusbar"><span class="dot" id="dot"></span><span class="spinner" id="spinner" hidden></span><span id="statusText">Loading the editor...</span></div>
-  <div class="busybar indeterminate" id="busyBar" role="progressbar" aria-label="Processing" hidden><div></div></div>
+  <div class="statusbar"><span class="dot" id="dot"></span><span class="spinner" id="spinner" hidden></span><span id="statusText">Loading the editor...</span><span class="busy-pct" id="busyPct" hidden></span></div>
+  <div class="busybar indeterminate" id="busyBar" data-testid="progress" role="progressbar" aria-label="Processing the VRM" aria-valuemin="0" aria-valuemax="100" hidden><div id="busyFill"></div></div>
 
   <div class="card">
     <div class="card-header">1 &middot; Input</div>

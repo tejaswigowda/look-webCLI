@@ -24,7 +24,7 @@ npm install     # dev tooling only (tests); the app itself needs nothing
 npm start       # http://127.0.0.1:8010 (any static host works; no COOP/COEP needed)
 ```
 
-Click **Try with the sample**, choose or drop a `.vrm`, or paste a URL. Edit in the editor below the input card, then press **Download VRM**: the editor bakes every edit (accessories included) into the file and the page saves it as `<name>.look.vrm`.
+Pick **Male** or **Female** in the **Base VRM** selector and press **Load base** (the two VRoid bases are bundled; nothing loads until you ask), choose or drop a `.vrm`, or paste a URL. Edit in the editor below the input card, then press **Download VRM**: the editor bakes every edit (accessories included) into the file and the page saves it as `<name>.look.vrm`.
 
 ## What you can edit
 
@@ -42,8 +42,10 @@ look-webCLI is a **pure transform**: input (a URL or a dropped file) in, artifac
 **Input** is any fetchable URL (a CDN, jsDelivr or raw GitHub, S3, a `data:` URL, or a previous stage's output, e.g. a portrait-webCLI result), or a file chosen or dropped on the page. Parameters go in the query string or the `#fragment` (the fragment never reaches the server, so use it for long `data:` URLs):
 
 ```
-index.html?vrm=<url>[&run=export]
+index.html?vrm=male|female|<url>[&run=export]
 ```
+
+`vrm=male` and `vrm=female` are the bundled VRoid bases (`sample/VRoid_V110_Male_v1.1.3.vrm`, `sample/VRoid_V110_Female_v1.1.3.vrm`), a same-origin `GET`. Any other value is a URL. `?vrm=male` alone just loads that base into the editor; with `run=export` it also bakes. Opened with no `vrm=` and no file, the page stays idle and loads nothing (the selector is there, one click loads the default, male).
 
 `owner/repo@ref:path` is optional sugar that expands to a jsDelivr URL, and a `raw.githubusercontent.com` URL that fails is retried once through jsDelivr. Neither is required. To pin an input, pass an immutable URL (jsDelivr `@<sha>`, content-addressed); the tool does not pin.
 
@@ -54,7 +56,7 @@ document.body.dataset.webcliStatus   // 'idle' | 'running' | 'done' | 'error'
 window.__webcli_result = { ok, op: 'export', artifact: { mime: 'model/gltf-binary', name, size, dataUrl }, error, meta: { source, bytesIn, bytesOut, vrmVersion } }
 ```
 
-`dataUrl` is the VRM as a `data:` URL (built on first read); `error` is a message when `ok` is false (then `artifact` is `null`). This is not a network write, only a way to retrieve the output. The same handle is set after a **Download VRM** pressed by hand. An unknown `run=` value, `run=export` without `vrm=`, an HTTP error and a file that is not a binary glTF all end in `data-webcli-status="error"` with a message. Stable hooks: `data-testid` `vrm-input`, `vrm-url`, `load`, `sample`, `download`, `result`.
+`dataUrl` is the VRM as a `data:` URL (built on first read); `error` is a message when `ok` is false (then `artifact` is `null`). This is not a network write, only a way to retrieve the output. The same handle is set after a **Download VRM** pressed by hand. An unknown `run=` value, `run=export` without `vrm=`, an HTTP error and a file that is not a binary glTF all end in `data-webcli-status="error"` with a message. Stable hooks: `data-testid` `vrm-input`, `vrm-url`, `load`, `base`, `load-base`, `download`, `result`.
 
 ```js
 // Playwright
@@ -64,13 +66,17 @@ const { ok, artifact, error } = await page.evaluate(() => window.__webcli_result
 const vrm = Buffer.from(artifact.dataUrl.split(',')[1], 'base64'); // starts with 'glTF'
 ```
 
-With no edits, `run=export` returned the input byte for byte on the bundled sample, and two runs were byte-identical (the tests assert both). Persisting the VRM and feeding its URL to the next stage is the orchestrator's job.
+With no edits, `run=export` returned the input byte for byte on both bundled bases, and two runs were byte-identical (the tests assert both). Persisting the VRM and feeding its URL to the next stage is the orchestrator's job.
 
 The wrapper talks to the editor iframe (`editor/index.html?embed=1`) with five `postMessage` types: `look-editor-ready`, `look-load-vrm`, `look-apply`, `look-edited-vrm` and `look-apply-failed`. Every message, in both directions, is checked for `origin === location.origin` and for the right window, and the target origin is always `location.origin`, never `*`. A fresh editor is opened for each VRM, so an earlier model is never baked into a later one.
 
+## Embedding in portrait-webCLI
+
+[portrait-webCLI](https://github.com/tejaswigowda/portrait-webCLI) embeds this tool's `docs/editor/` build: the raw editor in `?embed=1` mode, same origin, in an iframe, over the `look-*` postMessage protocol. The parent waits for `look-editor-ready`, sends `look-load-vrm` (`{ name, bytes }`, transferred), later sends `look-apply`, and the editor replies `look-edited-vrm` (`{ bytes }`) or `look-apply-failed` (also sent until a VRM has been parsed, so retry). Both sides check `origin === location.origin` and the other window, and post to `location.origin`, never `*`. The embedding repository refreshes its copy by copying `docs/editor/` from here; the standalone page in this repository is the same editor with its own wrapper (`docs/js/app.js` is a working reference for the parent side). `scripts/README.md` has the message table.
+
 ## Verify zero egress
 
-Open DevTools, Network tab, check **Preserve log**, load the sample and press **Download VRM**. Only static files from this site appear, all `GET`, none carrying a body, cookie or credential. There is no write path to audit: no `POST` or `PUT`, no account, no token. The one exception is a URL you name yourself (the URL field or `?vrm=`), which is fetched with a read-only `GET` and `credentials: 'omit'`; nothing is sent with it.
+Open DevTools, Network tab, check **Preserve log**, load a base and press **Download VRM**. Only static files from this site appear, all `GET`, none carrying a body, cookie or credential. There is no write path to audit: no `POST` or `PUT`, no account, no token. The one exception is a URL you name yourself (the URL field or `?vrm=`), which is fetched with a read-only `GET` and `credentials: 'omit'`; nothing is sent with it.
 
 The protections, from the outside in:
 
@@ -78,7 +84,7 @@ The protections, from the outside in:
 - **Egress guard** (`docs/js/guard.js`, under 60 lines, loaded before the app): inside the wrapper, `fetch` and `XMLHttpRequest` must be `GET` with no body to this origin, a `blob:` or `data:` URL, or the exact URL registered for the VRM just named; it also refuses `sendBeacon`, `WebSocket`, `EventSource`, WebRTC, WebTransport, workers, service workers and `window.open`. Every request is logged in `window.__look_net`. It is a second line behind the CSP; it cannot stop a browser extension or a host that replaces the file.
 - **Editor CSP** (the untouched `<meta>` in `docs/editor/index.html`): `default-src 'none'`, scripts from this origin plus `wasm-unsafe-eval` (no `unsafe-eval`), connections to this origin, `blob:` and `data:` only, no remote styles, fonts or images, `form-action 'none'`. The bundle has no analytics, Twitter, Firebase or Stripe code.
 
-`npm test` asserts it: every request while loading the page and the sample is same-origin, `GET` and bodyless; the guard refuses a `POST`, a foreign-origin fetch, `sendBeacon` and `WebSocket`; both CSPs are as above; the bundle scan finds no analytics, Stripe or Firebase host.
+`npm test` asserts it: every request while loading the page and a base is same-origin, `GET` and bodyless; the guard refuses a `POST`, a foreign-origin fetch, `sendBeacon` and `WebSocket`; both CSPs are as above; the bundle scan finds no analytics, Stripe or Firebase host.
 
 ## Testing
 
@@ -89,15 +95,15 @@ npm run test:static  # tests/static.test.mjs (CSP, no inline code, bundle scan, 
 npm run test:e2e     # tests/e2e.test.mjs    (headless Chromium via Playwright)
 ```
 
-`unit.test.mjs` covers `docs/js/webcli.js`: `vrm=` / `run=` parsing from the query and the `#fragment`, run validation, the jsDelivr sugar and raw-GitHub fallback, content-based name sniffing, `fetchInput` (GET only, `credentials: 'omit'`, no body), VRM 0.x / 1.0 detection, the output name and the result handle.
+`unit.test.mjs` covers `docs/js/webcli.js`: `vrm=` / `run=` parsing from the query and the `#fragment`, the `male` / `female` aliases (and that other names stay URLs), run validation, the jsDelivr sugar and raw-GitHub fallback, content-based name sniffing, `fetchInput` (GET only, `credentials: 'omit'`, no body), VRM 0.x / 1.0 detection, the output name and the result handle.
 
-`e2e.test.mjs` starts `server.js` on a free port and drives the real page: (a) zero egress, (b) `?vrm=<sample>&run=export` reaches `done` with a valid binary glTF carrying the VRM extension, and a second run is byte-identical (and, with no edits, identical to the input), (c) a bad `run=`, `run=export` without `vrm=`, a 404 and a non-VRM all give status `error`, (d) the file input plus the **Download** button saves `<name>.look.vrm`, (e) the URL field loads the sample and the editor viewport is not blank, (f) an edit made in the editor (the VRM title in the Meta tab) is baked into the downloaded file. The editor draws with WebGL, so the tests launch Chromium with SwiftShader (`--use-angle=swiftshader`), which also works on machines without a GPU. Playwright is the dev loop, not the product: it never runs at runtime.
+`e2e.test.mjs` starts `server.js` on a free port and drives the real page: (a) zero egress, (b) `?vrm=<male base>&run=export` reaches `done` with a valid binary glTF carrying the VRM extension, and a second run is byte-identical (and, with no edits, identical to the input), (c) a bad `run=`, `run=export` without `vrm=`, a 404 and a non-VRM all give status `error`, (d) the file input plus the **Download** button saves `<name>.look.vrm`, (e) the URL field loads the sample and the editor viewport is not blank, (f) an edit made in the editor (the VRM title in the Meta tab) is baked into the downloaded file, (g) `?vrm=female&run=export` gives `VRoid_V110_Female_v1.1.3.look.vrm`, valid and byte-identical on a second run, (h) with no `vrm=` nothing is fetched and the selector shows male, and (i) the selector loads the female base and the viewport is not blank. The editor draws with WebGL, so the tests launch Chromium with SwiftShader (`--use-angle=swiftshader`), which also works on machines without a GPU. Playwright is the dev loop, not the product: it never runs at runtime.
 
 ## Honest limitations
 
-- **The editor re-exports through its own writer.** The file you download is the editor's output, not a byte-audited edit of the input. With no edits it came back identical on the bundled sample, but that is a measurement on that file, not a guarantee for every VRM, and anything you do change is rewritten by the editor's code.
+- **The editor re-exports through its own writer.** The file you download is the editor's output, not a byte-audited edit of the input. With no edits it came back identical on both bundled bases, but that is a measurement on that file, not a guarantee for every VRM, and anything you do change is rewritten by the editor's code.
 - **Third-party, patched build.** The editor is [cecil-tools/VRMEditorTools](https://github.com/cecil-tools/VRMEditorTools) at a pinned commit (`e9975cf`) with a patch (`scripts/look-embed.patch`) that removes its network features and adds the embed protocol, the free accessories and the Outfit tab. It is a committed build you can regenerate (`scripts/README.md`), not code written for this repository, and its bugs are its own.
-- **Determinism is measured, not promised.** The bundled sample exports byte-identically across runs. Other VRMs, and edits that involve generated textures, are not covered by a test.
+- **Determinism is measured, not promised.** The bundled bases export byte-identically across runs. Other VRMs, and edits that involve generated textures, are not covered by a test.
 - **No service worker.** The editor iframe's CSP restricts `worker-src`, so there is no service worker. The app works offline after the first load only because everything is a same-origin static file the browser has already fetched; clear the cache and it needs the network once more. It is not an installable offline PWA.
 - **`https:` in the wrapper's `connect-src`** is there only so a user-named VRM URL can be read. The CSP alone cannot tell that URL from any other `https:` host; the egress guard narrows it to the one URL registered for the fetch.
 - **The wrapper CSP is a `<meta>`, not a header.** `frame-ancestors` cannot be set that way, so a static host that can send headers should add `frame-ancestors 'self'`.
@@ -113,7 +119,7 @@ docs/                    the static app (GitHub Pages root)
   js/app.js              the wrapper: loads the VRM, speaks the look-* protocol with the iframe
   js/guard.js            egress guard for the wrapper window
   editor/                the committed editor build (MIT, LICENSE-VRMEditorTools.txt)
-  sample/                the bundled base VRM (hinzka/52blendshapes-for-VRoid-face) and its README
+  sample/                the bundled male and female VRoid bases (hinzka/52blendshapes-for-VRoid-face) and their README
   icon.svg manifest.json
 server.js                static dev server for docs/
 scripts/                 build-editor.sh, look-embed.patch, README.md (how the editor build is regenerated)
@@ -123,9 +129,9 @@ tests/                   unit, static and Playwright end-to-end tests
 ## Attribution
 
 - The editor is [cecil-tools/VRMEditorTools](https://github.com/cecil-tools/VRMEditorTools), MIT licensed; its license is kept at `docs/editor/LICENSE-VRMEditorTools.txt`. It bundles three.js, Vue and other open-source libraries under their own licenses.
-- The sample is `VRoid_V110_Male_v1.1.3.vrm` from [hinzka/52blendshapes-for-VRoid-face](https://github.com/hinzka/52blendshapes-for-VRoid-face): a free VRoid base model with the 52 ARKit blendshapes, which that repository states may be used and redistributed freely. It is included unmodified (`docs/sample/README.md`).
+- The bases are `VRoid_V110_Male_v1.1.3.vrm` and `VRoid_V110_Female_v1.1.3.vrm` from [hinzka/52blendshapes-for-VRoid-face](https://github.com/hinzka/52blendshapes-for-VRoid-face): free VRoid base models with the 52 ARKit blendshapes, which that repository states may be used and redistributed freely. Both are included unmodified (`docs/sample/README.md`).
 - The accessories, outfits and patterns are generated in code by the editor build, so they carry no third-party asset.
 
 ## License
 
-The wrapper, tests and scripts in this repository are GPL-3.0-only. See [LICENSE](LICENSE). The vendored editor in `docs/editor/` keeps its own MIT notice (`docs/editor/LICENSE-VRMEditorTools.txt`), and the sample keeps its upstream terms.
+The wrapper, tests and scripts in this repository are GPL-3.0-only. See [LICENSE](LICENSE). The vendored editor in `docs/editor/` keeps its own MIT notice (`docs/editor/LICENSE-VRMEditorTools.txt`), and the bases keep their upstream terms.

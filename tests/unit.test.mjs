@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  OPS, MESSAGES, expandSource, rawFallback, parseRunParams, isGlb, assertVrm, vrmVersionOf, sniffExt, outName, baseName,
+  OPS, MESSAGES, BASES, expandSource, rawFallback, parseRunParams, isGlb, assertVrm, vrmVersionOf, sniffExt, outName, baseName,
   fetchInput, bytesToBase64, makeResult, failure,
 } from '../docs/js/webcli.js';
 
@@ -133,4 +133,29 @@ test('makeResult has the family shape; dataUrl is built lazily on first read', (
   assert.equal(r.artifact.mime, 'model/gltf-binary'); assert.equal(r.artifact.name, 'a.look.vrm'); assert.equal(r.artifact.size, bytes.length);
   assert.equal(r.artifact.dataUrl, `data:model/gltf-binary;base64,${Buffer.from(bytes).toString('base64')}`);
   assert.deepEqual(failure(new Error('boom')), { ok: false, op: 'export', artifact: null, error: 'boom', meta: null });
+});
+
+test('vrm=male and vrm=female are aliases for the bundled bases (query or #fragment), same-origin relative paths', () => {
+  assert.deepEqual(BASES, { male: 'sample/VRoid_V110_Male_v1.1.3.vrm', female: 'sample/VRoid_V110_Female_v1.1.3.vrm' });
+  assert.deepEqual(parseRunParams('?vrm=female&run=export'), { vrm: 'female', run: 'export', requested: true });
+  assert.deepEqual(parseRunParams('?vrm=male'), { vrm: 'male', run: null, requested: true });
+  assert.deepEqual(parseRunParams('', '#vrm=female&run=export'), { vrm: 'female', run: 'export', requested: true });
+  assert.equal(expandSource('male'), 'sample/VRoid_V110_Male_v1.1.3.vrm');
+  assert.equal(expandSource('Female'), 'sample/VRoid_V110_Female_v1.1.3.vrm');
+  assert.equal(expandSource(' male '), 'sample/VRoid_V110_Male_v1.1.3.vrm');
+});
+
+test('other names are still URLs: males.vrm, /male, male/x@y:z and toString are not aliases', () => {
+  for (const spec of ['males.vrm', '/male', 'male.vrm', 'https://example.com/male', 'toString', 'constructor']) assert.equal(expandSource(spec), spec);
+  assert.equal(expandSource('male/repo@main:a.vrm'), 'https://cdn.jsdelivr.net/gh/male/repo@main/a.vrm');
+});
+
+test('fetchInput on an alias is one GET of the bundled file and names it from the file', async () => {
+  const calls = [];
+  const fakeFetch = async (u, init) => { calls.push([u, init]); return { ok: true, status: 200, arrayBuffer: async () => glb() }; };
+  const f = await fetchInput('female', 'model', fakeFetch);
+  assert.deepEqual(calls.map(c => c[0]), ['sample/VRoid_V110_Female_v1.1.3.vrm']);
+  assert.equal(calls[0][1].method, 'GET'); assert.equal(calls[0][1].credentials, 'omit');
+  assert.equal(f.name, 'VRoid_V110_Female_v1.1.3.vrm');
+  assert.equal(outName(f.name), 'VRoid_V110_Female_v1.1.3.look.vrm');
 });

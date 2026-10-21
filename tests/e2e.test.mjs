@@ -9,9 +9,11 @@ import { createServer } from '../server.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE = '/sample/VRoid_V110_Male_v1.1.3.vrm';
+const FEMALE = '/sample/VRoid_V110_Female_v1.1.3.vrm';
 const SAMPLE_FILE = path.join(here, '..', 'docs', SAMPLE);
 const DONE = 'body[data-webcli-status=done], body[data-webcli-status=error]';
 const T = { timeout: 240000 };
+const FEMALE_FILE = path.join(here, '..', 'docs', FEMALE);
 const SAMPLE_SHA = crypto.createHash('sha256').update(fs.readFileSync(SAMPLE_FILE)).digest('hex');
 
 let server, origin, browser;
@@ -129,7 +131,7 @@ test('(c) a bad run= value, run=export without vrm=, and an unreadable input all
   }
 });
 
-test('(d) by hand: choose the sample as a file, edit nothing, press Download, get <name>.look.vrm', T, async () => {
+test('(d) by hand: choose the male base as a file, edit nothing, press Download, get <name>.look.vrm', T, async () => {
   const { page } = await open('/index.html');
   assert.equal(await page.getAttribute('body', 'data-webcli-status'), 'idle');
   assert.equal(await page.getByTestId('download').isDisabled(), true, 'nothing to download before a VRM is loaded');
@@ -183,6 +185,66 @@ test('(f) an edit made in the editor (the VRM title in the Meta tab) is baked in
   const json = parseGlb(buf);
   assert.equal((json.extensions.VRM || json.extensions.VRMC_vrm).meta.title, 'look-webCLI edit test');
   assert.notEqual(crypto.createHash('sha256').update(buf).digest('hex'), SAMPLE_SHA, 'the edit changed the bytes');
+  await page.close();
+});
+
+test('(g) ?vrm=female&run=export bakes the female base: <name>.look.vrm, valid glTF, byte-identical on a second run', T, async () => {
+  const runs = [];
+  for (let i = 0; i < 2; i++) {
+    const { page, requests } = await open('/index.html?vrm=female&run=export', { watch: true });
+    await page.waitForSelector(DONE, { timeout: 200000 });
+    const r = await readResult(page);
+    assert.equal(r.ok, true, r.error);
+    assert.equal(r.artifact.name, 'VRoid_V110_Female_v1.1.3.look.vrm');
+    const buf = Buffer.from(r.artifact.b64, 'base64');
+    assert.ok(parseGlb(buf).extensions?.VRM);
+    assert.equal(r.meta.bytesIn, fs.statSync(FEMALE_FILE).size);
+    assert.equal(r.meta.vrmVersion, '0.x');
+    assert.ok(requests.some(q => q.url.endsWith(FEMALE) && q.method === 'GET'), 'the female base was fetched from this origin');
+    assert.ok(!requests.some(q => q.url.endsWith(SAMPLE)), 'only the requested base is fetched');
+    runs.push(sha(r.artifact.b64));
+    await page.close();
+  }
+  assert.equal(runs[0], runs[1]);
+  assert.equal(runs[0], crypto.createHash('sha256').update(fs.readFileSync(FEMALE_FILE)).digest('hex'), 'with no edits the editor hands the base back unchanged');
+});
+
+test('(h) no vrm= means idle and nothing auto-loaded; the base selector is visible, male by default, and ?vrm=male just loads it', T, async () => {
+  const { page, requests } = await open('/index.html', { watch: true });
+  await page.waitForTimeout(2500);
+  assert.equal(await page.getAttribute('body', 'data-webcli-status'), 'idle');
+  assert.ok(!requests.some(r => r.url.endsWith('.vrm')), 'a VRM was fetched without being asked');
+  assert.equal(await page.getByTestId('base').isVisible(), true);
+  assert.equal(await page.getByTestId('base').inputValue(), 'male');
+  assert.deepEqual(await page.getByTestId('base').locator('option').allTextContents(), ['Male (VRoid base, bundled)', 'Female (VRoid base, bundled)']);
+  assert.equal(await page.evaluate(() => window.__webcli_result ?? null), null);
+  await page.close();
+
+  const m = await open('/index.html?vrm=male');
+  await m.page.waitForSelector('body[data-webcli-status=idle]');
+  await expect(m.page, '#resultInfo', /VRoid_V110_Male_v1\.1\.3\.vrm .*loaded/);
+  assert.equal(await m.page.evaluate(() => window.__webcli_result ?? null), null, 'no run= means no result handle');
+  await m.page.close();
+});
+
+test('(i) the selector loads the female base into the editor and the viewport is not blank', T, async () => {
+  const blank = await open('/index.html');
+  const bf = blank.page.locator('#editor').contentFrame();
+  await bf.locator('canvas').first().waitFor({ timeout: 60000 });
+  await blank.page.waitForTimeout(1500);
+  const before = (await bf.locator('canvas').first().screenshot()).length;
+  await blank.page.close();
+
+  const { page } = await open('/index.html');
+  await page.getByTestId('base').selectOption('female');
+  await page.getByTestId('load-base').click();
+  await expect(page, '#resultInfo', /VRoid_V110_Female_v1\.1\.3\.vrm .*VRM 0\.x\) loaded/);
+  const canvas = page.locator('#editor').contentFrame().locator('canvas').first();
+  let after = 0;
+  for (let i = 0; i < 60 && after < before * 1.5; i++) { await page.waitForTimeout(500); after = (await canvas.screenshot()).length; }
+  console.log(`# viewport PNG bytes: empty editor ${before}, female base ${after}`);
+  assert.ok(after > before * 1.5, 'the editor viewport still looks empty');
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
   await page.close();
 });
 

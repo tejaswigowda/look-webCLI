@@ -39,13 +39,18 @@
         </div>
         <input type="file" id="vrmInput" data-testid="vrm-input" hidden accept=".vrm,.glb">
         <div class="url-box">
+          <label class="field" for="base">Base VRM (bundled, 22 MB each)</label>
+          <div class="row">
+            <select id="base" class="grow" data-testid="base" aria-label="Base VRM">
+              <option value="male" selected>Male (VRoid base, bundled)</option>
+              <option value="female">Female (VRoid base, bundled)</option>
+            </select>
+            <button class="btn btn-ghost" id="btnBase" data-testid="load-base">Load base</button>
+          </div>
           <label class="field" for="vrmUrl">...or a URL (read-only GET)</label>
           <div class="row">
-            <input type="text" id="vrmUrl" class="grow" data-testid="vrm-url" spellcheck="false" autocomplete="off" placeholder="https://example.com/avatar.vrm, a data: URL, or owner/repo@ref:path">
+            <input type="text" id="vrmUrl" class="grow" data-testid="vrm-url" spellcheck="false" autocomplete="off" placeholder="https://example.com/avatar.vrm, male, female, a data: URL, or owner/repo@ref:path">
             <button class="btn btn-ghost" id="btnLoad" data-testid="load">Load</button>
-          </div>
-          <div class="row">
-            <button class="btn btn-ghost btn-sm" id="btnSample" data-testid="sample">Try with the sample (VRoid male, 22 MB)</button>
           </div>
         </div>
       </div>

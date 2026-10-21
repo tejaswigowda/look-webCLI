@@ -106,6 +106,8 @@ test('there is no service worker, and the manifest and icon are present', () => 
   assert.ok(!/serviceWorker\.register\(/.test(read('js/app.js')));
   assert.equal(JSON.parse(read('manifest.json')).short_name, 'look-webCLI');
   assert.match(read('icon.svg'), /viewBox="0 0 192 192"/);
-  assert.ok(fs.statSync(path.join(docs, 'sample', 'VRoid_V110_Male_v1.1.3.vrm')).size > 1e6);
+  assert.deepEqual(fs.readdirSync(path.join(docs, 'sample')).sort(), ['README.md', 'VRoid_V110_Female_v1.1.3.vrm', 'VRoid_V110_Male_v1.1.3.vrm']);
+  for (const f of ['VRoid_V110_Male_v1.1.3.vrm', 'VRoid_V110_Female_v1.1.3.vrm']) assert.ok(fs.statSync(path.join(docs, 'sample', f)).size > 1e6);
+  assert.match(read('index.html'), /<select id="base"[^>]*data-testid="base"[\s\S]*value="male" selected[\s\S]*value="female"/);
   assert.match(read('sample/README.md'), /hinzka\/52blendshapes-for-VRoid-face/);
 });

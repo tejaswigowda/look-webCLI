@@ -6,7 +6,6 @@ import { parseRunParams, fetchInput, assertVrm, vrmVersionOf, outName, makeResul
 const $ = id => document.getElementById(id);
 const frame = $('editor');
 const EDITOR_URL = 'editor/index.html?embed=1';
-const SAMPLE_URL = 'sample/VRoid_V110_Male_v1.1.3.vrm';
 const BAKE_TIMEOUT_MS = 120000;
 const RETRY_MS = 500;
 
@@ -61,7 +60,7 @@ window.addEventListener('message', e => {
   const d = e.data;
   if (d.type === MESSAGES.ready) {
     state.ready = true;
-    if (!state.current && document.body.getAttribute('data-webcli-status') === 'idle') setStatus('Editor ready. Choose a VRM, or try the sample.');
+    if (!state.current && document.body.getAttribute('data-webcli-status') === 'idle') setStatus('Editor ready. Choose a VRM or load a base.');
     sendVrm();
   } else if (d.type === MESSAGES.failed) {
     const b = state.bake;
@@ -147,7 +146,7 @@ window.addEventListener('drop', e => {
 });
 $('btnLoad').addEventListener('click', () => { const v = $('vrmUrl').value.trim(); if (v) loadFromField(v); else setStatus('Type a URL first.', 'error'); });
 $('vrmUrl').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnLoad').click(); });
-$('btnSample').addEventListener('click', () => { $('vrmUrl').value = ''; loadFromField(SAMPLE_URL); });
+$('btnBase').addEventListener('click', () => { $('vrmUrl').value = ''; loadFromField($('base').value); });
 $('btnDownload').addEventListener('click', async () => {
   $('btnDownload').disabled = true;
   const bytes = await exportNow();

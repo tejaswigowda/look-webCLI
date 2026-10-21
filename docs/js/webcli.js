@@ -9,12 +9,17 @@ export const MESSAGES = Object.freeze({
   ready: 'look-editor-ready', load: 'look-load-vrm', apply: 'look-apply', edited: 'look-edited-vrm', failed: 'look-apply-failed',
 });
 
+// The bundled VRoid bases: vrm=male and vrm=female are same-origin GETs of these files.
+export const BASES = Object.freeze({ male: 'sample/VRoid_V110_Male_v1.1.3.vrm', female: 'sample/VRoid_V110_Female_v1.1.3.vrm' });
+
 const KNOWN_EXT = /\.(vrm|glb)$/i;
 const SHORTHAND = /^([\w.-]+)\/([\w.-]+)@([^:\s]+):(.+)$/;
 const RAW = /^https:\/\/raw\.githubusercontent\.com\/([\w.-]+)\/([\w.-]+)\/([^/]+)\/(.+)$/;
 
-// `owner/repo@ref:path` is optional sugar for the jsDelivr URL; any other string is already a URL.
+// `male` / `female` name a bundled base; `owner/repo@ref:path` is optional sugar for the jsDelivr URL; any other string is already a URL.
 export function expandSource(spec) {
+  const key = spec.trim().toLowerCase();
+  if (Object.hasOwn(BASES, key)) return BASES[key];
   const m = SHORTHAND.exec(spec);
   return m ? `https://cdn.jsdelivr.net/gh/${m[1]}/${m[2]}@${m[3]}/${m[4]}` : spec;
 }
